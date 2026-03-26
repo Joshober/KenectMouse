@@ -43,10 +43,32 @@ From the repo:
 
 ```bash
 cd KenectMouse
+# If you cloned earlier, pull the latest docs/requirements:
+# git pull
+#
 # Use system-site-packages so the venv can see the apt-installed `cv2` (python3-opencv).
 python3 -m venv .venv --system-site-packages
 source .venv/bin/activate
 pip install -r requirements.txt
+```
+
+### If you see “can’t find a compatible version of cv2/opencv”
+
+On Raspberry Pi, `cv2` usually comes from **apt**, not `pip`.
+
+Fix:
+
+```bash
+sudo apt update
+sudo apt install -y python3-opencv
+
+cd KenectMouse
+deactivate 2>/dev/null || true
+rm -rf .venv
+python3 -m venv .venv --system-site-packages
+source .venv/bin/activate
+pip install -r requirements.txt
+python3 -c "import cv2; print(cv2.__version__)"
 ```
 
 ## 4) Preview what the code sees
