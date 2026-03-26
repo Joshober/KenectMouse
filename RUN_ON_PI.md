@@ -1,3 +1,12 @@
+python3 kinect_mouse.py ^
+  --target closest ^
+  --alpha 0.45 ^
+  --nearest-percentile 2 ^
+  --depth-band 60 ^
+  --min-area 900 ^
+  --max-area 30000 ^
+  --morph-kernel 3 --morph-open-iters 1 --morph-close-iters 0
+  
 # Run on Raspberry Pi 4 (Kinect v1)
 python3 kinect_mouse.py --target closest --depth-band 80 --max-area 35000 --min-area 1200
 
