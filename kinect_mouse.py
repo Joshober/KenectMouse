@@ -21,7 +21,7 @@ def get_depth():
     return depth.astype(np.uint16)
 
 
-def get_hand_position(depth, min_area, depth_band):
+def get_hand_position(depth, min_area, max_area, depth_band, target_mode):
     # Ignore invalid values and very far points.
     valid = np.where((depth > 0) & (depth < 2047), depth, 0).astype(np.uint16)
     if np.count_nonzero(valid) == 0:
@@ -40,11 +40,41 @@ def get_hand_position(depth, min_area, depth_band):
     if not contours:
         return None
 
-    largest = max(contours, key=cv2.contourArea)
-    if cv2.contourArea(largest) < min_area:
+    candidates = []
+    for c in contours:
+        area = float(cv2.contourArea(c))
+        if area < float(min_area):
+            continue
+        if max_area is not None and area > float(max_area):
+            continue
+        candidates.append((area, c))
+
+    if not candidates:
         return None
 
-    moments = cv2.moments(largest)
+    if target_mode == "largest":
+        chosen = max(candidates, key=lambda t: t[0])[1]
+    elif target_mode == "closest":
+        # Pick the blob with the smallest median depth within its contour.
+        # This tends to lock onto a hand/band closer to the sensor than the torso.
+        best = None
+        best_med = None
+        for _, c in candidates:
+            cmask = np.zeros(mask.shape, dtype=np.uint8)
+            cv2.drawContours(cmask, [c], -1, 255, thickness=-1)
+            dvals = valid[cmask > 0]
+            dvals = dvals[dvals > 0]
+            if dvals.size == 0:
+                continue
+            med = float(np.median(dvals))
+            if best is None or med < best_med:
+                best = c
+                best_med = med
+        chosen = best if best is not None else max(candidates, key=lambda t: t[0])[1]
+    else:
+        chosen = max(candidates, key=lambda t: t[0])[1]
+
+    moments = cv2.moments(chosen)
     if moments["m00"] == 0:
         return None
 
@@ -53,7 +83,7 @@ def get_hand_position(depth, min_area, depth_band):
     return x, y
 
 
-def run(alpha, click_threshold, min_area, enable_click, depth_band, flip_y, edge_margin):
+def run(alpha, click_threshold, min_area, max_area, enable_click, depth_band, flip_y, edge_margin, target_mode):
     screen_w, screen_h = pyautogui.size()
     prev_x, prev_y = 0, 0
     prev_depth = None
@@ -67,7 +97,10 @@ def run(alpha, click_threshold, min_area, enable_click, depth_band, flip_y, edge
 
     print("Kinect v1 mouse control started.")
     print("Press ESC in the depth window to quit.")
-    print(f"Calibration: depth_band={depth_band}, flip_y={flip_y}, edge_margin={margin}, alpha={alpha}, min_area={min_area}")
+    print(
+        f"Calibration: depth_band={depth_band}, flip_y={flip_y}, edge_margin={margin}, alpha={alpha}, "
+        f"min_area={min_area}, max_area={max_area}, target={target_mode}"
+    )
 
     while True:
         depth = get_depth()
@@ -75,7 +108,13 @@ def run(alpha, click_threshold, min_area, enable_click, depth_band, flip_y, edge
             time.sleep(0.01)
             continue
 
-        hand = get_hand_position(depth, min_area=min_area, depth_band=depth_band)
+        hand = get_hand_position(
+            depth,
+            min_area=min_area,
+            max_area=max_area,
+            depth_band=depth_band,
+            target_mode=target_mode,
+        )
         if hand is not None:
             x, y = hand
 
@@ -135,6 +174,12 @@ def parse_args():
         help="Minimum contour area for hand blob tracking (default: 1500).",
     )
     parser.add_argument(
+        "--max-area",
+        type=int,
+        default=0,
+        help="Ignore blobs larger than this area (0 disables). Useful to ignore torso (example: 35000).",
+    )
+    parser.add_argument(
         "--disable-click",
         action="store_true",
         help="Disable push-forward click gesture.",
@@ -145,6 +190,12 @@ def parse_args():
         default=120,
         help="Kinect raw-depth window around nearest objects (default: 120). "
         "Smaller = stricter 'closest blob' (less background), larger = more forgiving.",
+    )
+    parser.add_argument(
+        "--target",
+        choices=["largest", "closest"],
+        default="largest",
+        help="Which blob to track: 'largest' (default) or 'closest' (better for hand/band).",
     )
     parser.add_argument(
         "--flip-y",
@@ -167,8 +218,10 @@ if __name__ == "__main__":
         alpha=max(0.0, min(1.0, args.alpha)),
         click_threshold=max(1, args.click_threshold),
         min_area=max(100, args.min_area),
+        max_area=None if args.max_area <= 0 else max(1, args.max_area),
         enable_click=not args.disable_click,
         depth_band=max(20, min(800, args.depth_band)),
         flip_y=args.flip_y,
         edge_margin=args.edge_margin,
+        target_mode=args.target,
     )
