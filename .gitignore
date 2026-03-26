@@ -1,0 +1,21 @@
+.venv/
+.venv310/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+
+# Python tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local logs / misc
+*.log
+

@@ -1,0 +1,5 @@
+numpy
+opencv-python
+freenect
+pyautogui
+matplotlib

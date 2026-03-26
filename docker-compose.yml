@@ -1,0 +1,12 @@
+services:
+  kinect-mouse:
+    build: .
+    container_name: kinect-v1-mouse
+    restart: unless-stopped
+    privileged: true
+    devices:
+      - /dev/bus/usb:/dev/bus/usb
+      - /dev/uinput:/dev/uinput
+    volumes:
+      - ./:/app
+    command: python kinect_v1_mouse.py
