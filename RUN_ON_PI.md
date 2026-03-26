@@ -1,5 +1,17 @@
 # Run on Raspberry Pi 4 (Kinect v1)
 
+## TL;DR
+
+```bash
+git clone https://github.com/Joshober/KenectMouse.git
+cd KenectMouse
+```
+
+Then follow **sections 1 → 2 → 3** in order (system packages → test Kinect → venv + `pip install`).  
+If anything fails, jump to the troubleshooting blocks under each section.
+
+**Pi-specific:** On ARM, `requirements.txt` does **not** pip-install **`opencv-python`** or **`freenect`** (they are unreliable on Pi). Install **`python3-opencv`** and **`python3-freenect`** with **apt**, and use a venv with **`--system-site-packages`** so `import cv2` and `import freenect` work.
+
 This repo includes a few scripts:
 
 - `kinect_mouse.py`: depth-hand cursor control (desktop/X11)

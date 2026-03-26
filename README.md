@@ -2,6 +2,10 @@
 
 Control your cursor with Kinect v1 depth tracking on Linux (including Raspberry Pi).
 
+## Raspberry Pi (native install, no Docker)
+
+Step-by-step guide (Kinect drivers, OpenCV, freenect, venv, run): see **`RUN_ON_PI.md`**.
+
 ## What this uses
 
 - Kinect v1 (`libfreenect`)
