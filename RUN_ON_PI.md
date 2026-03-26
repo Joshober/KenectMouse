@@ -1,3 +1,12 @@
+un (recommended)
+python3 kinect_mouse.py --use-rgb --show-rgb --rgb-refine-depth closest
+If “closest” is too jittery (depth noise), use percentile
+This targets a stable “near” depth within the orange blob:
+
+python3 kinect_mouse.py --use-rgb --show-rgb --rgb-refine-depth percentile --rgb-depth-percentile 15
+Turn off the depth refine (RGB-only) if you want
+python3 kinect_mouse.py --use-rgb --rgb-refine-depth none
+
 python3 kinect_mouse.py ^
   --target closest ^
   --alpha 0.45 ^
@@ -6,7 +15,27 @@ python3 kinect_mouse.py ^
   --min-area 900 ^
   --max-area 30000 ^
   --morph-kernel 3 --morph-open-iters 1 --morph-close-iters 0
-  
+
+
+
+
+More responsive (less lag): increase --alpha (try 0.55), reduce morphology (--morph-kernel 3, set --morph-close-iters 0)
+More accurate “only the band”: lower --nearest-percentile (try 1.0–2.0) and lower --depth-band (try 40–70)
+If it jumps to noise: raise --min-area (e.g. 1200–2000) and/or turn --morph-close-iters 1 back on
+If it still follows your body: lower --max-area (e.g. 20000–25000) and keep --target closest
+Physical setup that matters a lot
+Stand so your band/hand is closer to the Kinect than your torso (even 10–20 cm closer helps), and keep the band clearly in front when controlling.
+
+
+
+
+
+
+
+
+
+
+
 # Run on Raspberry Pi 4 (Kinect v1)
 python3 kinect_mouse.py --target closest --depth-band 80 --max-area 35000 --min-area 1200
 

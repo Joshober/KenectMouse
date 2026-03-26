@@ -21,6 +21,124 @@ def get_depth():
     return depth.astype(np.uint16)
 
 
+def get_rgb():
+    frame = freenect.sync_get_video()
+    if frame is None:
+        return None
+    rgb, _ = frame
+    if rgb is None:
+        return None
+    # libfreenect returns RGB (not BGR)
+    return rgb.astype(np.uint8)
+
+
+def depth_sample(depth, x, y, radius):
+    h, w = depth.shape[:2]
+    r = max(0, int(radius))
+    x0 = max(0, int(x) - r)
+    x1 = min(w - 1, int(x) + r)
+    y0 = max(0, int(y) - r)
+    y1 = min(h - 1, int(y) + r)
+    patch = depth[y0 : y1 + 1, x0 : x1 + 1]
+    vals = patch[(patch > 0) & (patch < 2047)]
+    if vals.size == 0:
+        return None
+    return int(np.median(vals))
+
+
+def get_marker_position_rgb(
+    rgb,
+    min_area,
+    max_area,
+    hsv_lower,
+    hsv_upper,
+    morph_kernel,
+    morph_open_iters,
+    morph_close_iters,
+):
+    hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
+    lower = np.array(hsv_lower, dtype=np.uint8)
+    upper = np.array(hsv_upper, dtype=np.uint8)
+    mask = cv2.inRange(hsv, lower, upper)
+
+    k = max(1, int(morph_kernel))
+    if k % 2 == 0:
+        k += 1
+    kernel = np.ones((k, k), np.uint8)
+    oi = max(0, int(morph_open_iters))
+    ci = max(0, int(morph_close_iters))
+    if oi > 0:
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=oi)
+    if ci > 0:
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=ci)
+
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return None, mask
+
+    candidates = []
+    for c in contours:
+        area = float(cv2.contourArea(c))
+        if area < float(min_area):
+            continue
+        if max_area is not None and area > float(max_area):
+            continue
+        candidates.append((area, c))
+
+    if not candidates:
+        return None, mask
+
+    chosen = max(candidates, key=lambda t: t[0])[1]
+    m = cv2.moments(chosen)
+    if m["m00"] == 0:
+        return None, mask
+    y = int(m["m01"] / m["m00"])
+    x = int(m["m10"] / m["m00"])
+    return (x, y), mask
+
+
+def refine_rgb_position_with_depth(
+    pos,
+    rgb_mask,
+    depth,
+    strategy,
+    depth_percentile,
+):
+    if pos is None or rgb_mask is None or depth is None:
+        return pos
+
+    if strategy == "none":
+        return pos
+
+    mask_coords = np.where(rgb_mask > 0)
+    if mask_coords[0].size == 0:
+        return pos
+
+    ys = mask_coords[0]
+    xs = mask_coords[1]
+    dvals = depth[ys, xs].astype(np.int32)
+    valid = (dvals > 0) & (dvals < 2047)
+    if not np.any(valid):
+        return pos
+
+    xs = xs[valid]
+    ys = ys[valid]
+    dvals = dvals[valid]
+
+    if strategy == "closest":
+        idx = int(np.argmin(dvals))
+        return int(xs[idx]), int(ys[idx])
+
+    if strategy == "percentile":
+        p = float(depth_percentile)
+        p = max(0.0, min(100.0, p))
+        target = float(np.percentile(dvals, p))
+        idx = int(np.argmin(np.abs(dvals.astype(np.float32) - target)))
+        return int(xs[idx]), int(ys[idx])
+
+    return pos
+
+
 def get_hand_position(
     depth,
     min_area,
@@ -115,6 +233,13 @@ def run(
     morph_kernel,
     morph_open_iters,
     morph_close_iters,
+    use_rgb,
+    hsv_lower,
+    hsv_upper,
+    rgb_depth_radius,
+    show_rgb,
+    rgb_refine_depth,
+    rgb_depth_percentile,
 ):
     screen_w, screen_h = pyautogui.size()
     prev_x, prev_y = 0, 0
@@ -133,6 +258,11 @@ def run(
         f"Calibration: depth_band={depth_band}, flip_y={flip_y}, edge_margin={margin}, alpha={alpha}, "
         f"min_area={min_area}, max_area={max_area}, target={target_mode}"
     )
+    if use_rgb:
+        print(
+            f"RGB mode: hsv_lower={tuple(hsv_lower)}, hsv_upper={tuple(hsv_upper)}, "
+            f"rgb_depth_radius={rgb_depth_radius}, show_rgb={show_rgb}"
+        )
 
     while True:
         depth = get_depth()
@@ -140,17 +270,41 @@ def run(
             time.sleep(0.01)
             continue
 
-        hand = get_hand_position(
-            depth,
-            min_area=min_area,
-            max_area=max_area,
-            depth_band=depth_band,
-            target_mode=target_mode,
-            nearest_percentile=nearest_percentile,
-            morph_kernel=morph_kernel,
-            morph_open_iters=morph_open_iters,
-            morph_close_iters=morph_close_iters,
-        )
+        rgb = None
+        rgb_mask = None
+        if use_rgb:
+            rgb = get_rgb()
+            if rgb is not None:
+                hand, rgb_mask = get_marker_position_rgb(
+                    rgb,
+                    min_area=min_area,
+                    max_area=max_area,
+                    hsv_lower=hsv_lower,
+                    hsv_upper=hsv_upper,
+                    morph_kernel=morph_kernel,
+                    morph_open_iters=morph_open_iters,
+                    morph_close_iters=morph_close_iters,
+                )
+                if hand is not None and rgb_refine_depth != "none":
+                    hand = refine_rgb_position_with_depth(
+                        hand,
+                        rgb_mask=rgb_mask,
+                        depth=depth,
+                        strategy=rgb_refine_depth,
+                        depth_percentile=rgb_depth_percentile,
+                    )
+        else:
+            hand = get_hand_position(
+                depth,
+                min_area=min_area,
+                max_area=max_area,
+                depth_band=depth_band,
+                target_mode=target_mode,
+                nearest_percentile=nearest_percentile,
+                morph_kernel=morph_kernel,
+                morph_open_iters=morph_open_iters,
+                morph_close_iters=morph_close_iters,
+            )
         if hand is not None:
             x, y = hand
 
@@ -171,7 +325,8 @@ def run(
             prev_x, prev_y = smooth_x, smooth_y
 
             if enable_click:
-                current_depth = int(depth[y, x])
+                d = depth_sample(depth, x, y, radius=rgb_depth_radius if use_rgb else 0)
+                current_depth = d if d is not None else int(depth[y, x])
                 if prev_depth is not None and current_depth < (prev_depth - click_threshold):
                     pyautogui.click()
                 prev_depth = current_depth
@@ -180,6 +335,9 @@ def run(
 
         depth_display = (np.clip(depth, 0, 2048) / 2048 * 255).astype(np.uint8)
         cv2.imshow("Depth", depth_display)
+        if use_rgb and show_rgb and rgb is not None and rgb_mask is not None:
+            cv2.imshow("RGB", cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR))
+            cv2.imshow("RGB Mask", rgb_mask)
 
         if cv2.waitKey(1) & 0xFF == 27:
             break
@@ -258,6 +416,50 @@ def parse_args():
         help="How many MORPH_CLOSE iterations (default: 1). Set 0 to disable.",
     )
     parser.add_argument(
+        "--use-rgb",
+        action="store_true",
+        help="Track a colored marker using Kinect RGB (recommended for a bright orange box).",
+    )
+    parser.add_argument(
+        "--hsv-lower",
+        type=int,
+        nargs=3,
+        default=[5, 120, 120],
+        metavar=("H", "S", "V"),
+        help="HSV lower bound for marker threshold (default tuned for orange).",
+    )
+    parser.add_argument(
+        "--hsv-upper",
+        type=int,
+        nargs=3,
+        default=[25, 255, 255],
+        metavar=("H", "S", "V"),
+        help="HSV upper bound for marker threshold (default tuned for orange).",
+    )
+    parser.add_argument(
+        "--rgb-depth-radius",
+        type=int,
+        default=8,
+        help="When using RGB, sample depth in a +/-radius neighborhood for click depth (default: 8).",
+    )
+    parser.add_argument(
+        "--show-rgb",
+        action="store_true",
+        help="Show RGB + mask windows (helpful for tuning HSV).",
+    )
+    parser.add_argument(
+        "--rgb-refine-depth",
+        choices=["none", "closest", "percentile"],
+        default="closest",
+        help="When using RGB, refine the marker position using depth inside the RGB mask (default: closest).",
+    )
+    parser.add_argument(
+        "--rgb-depth-percentile",
+        type=float,
+        default=10.0,
+        help="If --rgb-refine-depth percentile: which depth percentile inside the RGB mask to target (default: 10).",
+    )
+    parser.add_argument(
         "--flip-y",
         action="store_true",
         help="Invert vertical mapping (hand up moves cursor up — often feels more natural).",
@@ -288,4 +490,11 @@ if __name__ == "__main__":
         morph_kernel=max(1, args.morph_kernel),
         morph_open_iters=max(0, args.morph_open_iters),
         morph_close_iters=max(0, args.morph_close_iters),
+        use_rgb=bool(args.use_rgb),
+        hsv_lower=[max(0, min(179, int(v))) for v in args.hsv_lower],
+        hsv_upper=[max(0, min(255, int(v))) for v in args.hsv_upper],
+        rgb_depth_radius=max(0, int(args.rgb_depth_radius)),
+        show_rgb=bool(args.show_rgb),
+        rgb_refine_depth=str(args.rgb_refine_depth),
+        rgb_depth_percentile=max(0.0, min(100.0, float(args.rgb_depth_percentile))),
     )
