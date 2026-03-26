@@ -1,4 +1,5 @@
 # Run on Raspberry Pi 4 (Kinect v1)
+python3 kinect_mouse.py --target closest --depth-band 80 --max-area 35000 --min-area 1200
 
 ## TL;DR
 
