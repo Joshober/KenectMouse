@@ -43,7 +43,8 @@ From the repo:
 
 ```bash
 cd KenectMouse
-python3 -m venv .venv
+# Use system-site-packages so the venv can see the apt-installed `cv2` (python3-opencv).
+python3 -m venv .venv --system-site-packages
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
