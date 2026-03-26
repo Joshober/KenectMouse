@@ -25,6 +25,42 @@ sudo apt install -y \
   python3-pip python3-venv \
   libfreenect-dev freenect libfreenect-bin \
   python3-opencv
+
+# Python binding for libfreenect (avoids broken `pip install freenect` wheels on Pi):
+sudo apt install -y python3-freenect
+```
+
+### If `python3-freenect` is not found
+
+Your OS image may be missing that package. Then install build deps and use pip **on the same Python you run**
+
+(the `freenect` PyPI package compiles Cython against `libfreenect`):
+
+```bash
+sudo apt install -y python3-dev build-essential cython3 libfreenect-dev
+cd KenectMouse
+source .venv/bin/activate
+pip install -r requirements-pi-freenect-pip.txt
+```
+
+### If pip still fails to build `freenect` (common on very new Python, e.g. 3.13)
+
+Use **Python 3.11** for the venv (Bookworm+/Trixie often ship it):
+
+```bash
+sudo apt update
+sudo apt install -y python3.11 python3.11-venv python3.11-dev \
+  libfreenect-dev build-essential cython3
+
+cd KenectMouse
+deactivate 2>/dev/null || true
+rm -rf .venv
+python3.11 -m venv .venv --system-site-packages
+source .venv/bin/activate
+pip install -U pip setuptools wheel
+pip install -r requirements.txt
+pip install -r requirements-pi-freenect-pip.txt   # only if python3-freenect apt pkg missing
+python3 -c "import freenect; print('freenect OK')"
 ```
 
 ## 2) Test Kinect first (don’t skip)
@@ -70,6 +106,14 @@ source .venv/bin/activate
 pip install -r requirements.txt
 python3 -c "import cv2; print(cv2.__version__)"
 ```
+
+Quick check that **freenect** is importable (should print `freenect OK`):
+
+```bash
+python3 -c "import freenect; print('freenect OK')"
+```
+
+If this fails before you even run preview/mouse, fix `python3-freenect` / pip build / Python version (sections above) first.
 
 ## 4) Preview what the code sees
 

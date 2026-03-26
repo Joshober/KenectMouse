@@ -1,5 +1,7 @@
 numpy
 opencv-python; platform_machine != "aarch64" and platform_machine != "armv7l"
-freenect
+# On Raspberry Pi / ARM, install the Python module with apt: python3-freenect (see RUN_ON_PI.md).
+# Pip builds often fail on ARM unless build deps + matching Python/Cython are right.
+freenect; platform_machine != "aarch64" and platform_machine != "armv7l"
 pyautogui
 matplotlib
