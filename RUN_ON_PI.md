@@ -55,19 +55,27 @@ source .venv/bin/activate
 pip install -r requirements-pi-freenect-pip.txt
 ```
 
-### If pip still fails to build `freenect` (common on very new Python, e.g. 3.13)
+### If pip still fails to build `freenect` (common on very new Python, e.g. 3.12 / 3.13)
 
-Use **Python 3.11** for the venv (Bookworm+/Trixie often ship it):
+Use an **older Python** for the venv (often **3.10** or **3.11**), whichever your OS ships.
+
+List what’s available:
+
+```bash
+apt-cache search --names-only '^python3\.1[0-9]$'
+```
+
+Example with **Python 3.10** (replace `3.10` with another version from the list if needed):
 
 ```bash
 sudo apt update
-sudo apt install -y python3.11 python3.11-venv python3.11-dev \
+sudo apt install -y python3.10 python3.10-venv python3.10-dev \
   libfreenect-dev build-essential cython3
 
 cd KenectMouse
 deactivate 2>/dev/null || true
 rm -rf .venv
-python3.11 -m venv .venv --system-site-packages
+python3.10 -m venv .venv --system-site-packages
 source .venv/bin/activate
 pip install -U pip setuptools wheel
 pip install -r requirements.txt
