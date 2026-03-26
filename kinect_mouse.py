@@ -21,20 +21,38 @@ def get_depth():
     return depth.astype(np.uint16)
 
 
-def get_hand_position(depth, min_area, max_area, depth_band, target_mode):
+def get_hand_position(
+    depth,
+    min_area,
+    max_area,
+    depth_band,
+    target_mode,
+    nearest_percentile,
+    morph_kernel,
+    morph_open_iters,
+    morph_close_iters,
+):
     # Ignore invalid values and very far points.
     valid = np.where((depth > 0) & (depth < 2047), depth, 0).astype(np.uint16)
     if np.count_nonzero(valid) == 0:
         return None
 
     # Use a near-depth band so background doesn't dominate the "closest point".
-    nearest = np.percentile(valid[valid > 0], 5)
+    # Smaller percentile = more "lock to nearest" (often hand/band), but can be noisier.
+    nearest = np.percentile(valid[valid > 0], nearest_percentile)
     near_band_max = min(nearest + depth_band, 2047)
     mask = np.where((valid >= nearest) & (valid <= near_band_max), 255, 0).astype(np.uint8)
 
-    kernel = np.ones((5, 5), np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+    k = max(1, int(morph_kernel))
+    if k % 2 == 0:
+        k += 1
+    kernel = np.ones((k, k), np.uint8)
+    oi = max(0, int(morph_open_iters))
+    ci = max(0, int(morph_close_iters))
+    if oi > 0:
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=oi)
+    if ci > 0:
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=ci)
 
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
@@ -83,7 +101,21 @@ def get_hand_position(depth, min_area, max_area, depth_band, target_mode):
     return x, y
 
 
-def run(alpha, click_threshold, min_area, max_area, enable_click, depth_band, flip_y, edge_margin, target_mode):
+def run(
+    alpha,
+    click_threshold,
+    min_area,
+    max_area,
+    enable_click,
+    depth_band,
+    flip_y,
+    edge_margin,
+    target_mode,
+    nearest_percentile,
+    morph_kernel,
+    morph_open_iters,
+    morph_close_iters,
+):
     screen_w, screen_h = pyautogui.size()
     prev_x, prev_y = 0, 0
     prev_depth = None
@@ -114,6 +146,10 @@ def run(alpha, click_threshold, min_area, max_area, enable_click, depth_band, fl
             max_area=max_area,
             depth_band=depth_band,
             target_mode=target_mode,
+            nearest_percentile=nearest_percentile,
+            morph_kernel=morph_kernel,
+            morph_open_iters=morph_open_iters,
+            morph_close_iters=morph_close_iters,
         )
         if hand is not None:
             x, y = hand
@@ -192,10 +228,34 @@ def parse_args():
         "Smaller = stricter 'closest blob' (less background), larger = more forgiving.",
     )
     parser.add_argument(
+        "--nearest-percentile",
+        type=float,
+        default=5.0,
+        help="Which percentile defines 'nearest' depth (default: 5). Lower = more 'nearest lock' (1–3 often works for a band).",
+    )
+    parser.add_argument(
         "--target",
         choices=["largest", "closest"],
         default="largest",
         help="Which blob to track: 'largest' (default) or 'closest' (better for hand/band).",
+    )
+    parser.add_argument(
+        "--morph-kernel",
+        type=int,
+        default=5,
+        help="Morphology kernel size (odd int; default: 5). Smaller = faster/more responsive but noisier.",
+    )
+    parser.add_argument(
+        "--morph-open-iters",
+        type=int,
+        default=1,
+        help="How many MORPH_OPEN iterations (default: 1). Set 0 to disable.",
+    )
+    parser.add_argument(
+        "--morph-close-iters",
+        type=int,
+        default=1,
+        help="How many MORPH_CLOSE iterations (default: 1). Set 0 to disable.",
     )
     parser.add_argument(
         "--flip-y",
@@ -224,4 +284,8 @@ if __name__ == "__main__":
         flip_y=args.flip_y,
         edge_margin=args.edge_margin,
         target_mode=args.target,
+        nearest_percentile=max(0.1, min(20.0, float(args.nearest_percentile))),
+        morph_kernel=max(1, args.morph_kernel),
+        morph_open_iters=max(0, args.morph_open_iters),
+        morph_close_iters=max(0, args.morph_close_iters),
     )
