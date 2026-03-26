@@ -127,6 +127,40 @@ python3 -c "import freenect; print('freenect OK')"
 
 If this fails before you even run preview/mouse, fix `python3-freenect` / pip build / Python version (sections above) first.
 
+### If pip says it “can’t find a version” of `freenect`
+
+On Raspberry Pi, the PyPI `freenect` package often fails (or has no compatible wheels).
+Use the **apt** Python binding instead.
+
+```bash
+sudo apt update
+sudo apt install -y python3-freenect libfreenect-dev freenect libfreenect-bin
+python3 -c "import freenect; print('freenect OK')"
+```
+
+Then rebuild your venv so it can see apt packages:
+
+```bash
+cd KenectMouse
+deactivate 2>/dev/null || true
+rm -rf .venv
+python3 -m venv .venv --system-site-packages
+source .venv/bin/activate
+python3 -m pip install -U pip setuptools wheel
+python3 -m pip install -r requirements.txt
+```
+
+If you *still* see pip trying to install `freenect` from PyPI, verify you’re using the repo you just updated and that you didn’t run `pip` from a different Python:
+
+```bash
+cd KenectMouse
+python3 -c "import platform; print('machine=', platform.machine())"
+python3 -m pip --version
+python3 -m pip install -r requirements.txt -vvv
+```
+
+Paste the line where it attempts to install `freenect` and I’ll tell you why the marker wasn’t applied.
+
 ## 4) Preview what the code sees
 
 OpenCV preview:
