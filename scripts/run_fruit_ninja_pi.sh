@@ -77,7 +77,14 @@ if [[ "${SKIP_APT}" -eq 0 ]]; then
   sudo apt install -y \
     python3-pip python3-venv \
     libfreenect-dev freenect libfreenect-bin \
-    python3-opencv python3-freenect
+    python3-opencv
+
+  # python3-freenect may be missing on some Pi OS images.
+  if apt-cache show python3-freenect >/dev/null 2>&1; then
+    sudo apt install -y python3-freenect
+  else
+    echo "==> python3-freenect package not found in apt; will use pip fallback after venv setup."
+  fi
 fi
 
 if [[ "${RUN_GLVIEW}" -eq 1 ]]; then
@@ -92,6 +99,19 @@ python3 -m venv "${VENV_DIR}" --system-site-packages
 source "${VENV_DIR}/bin/activate"
 python3 -m pip install -U pip setuptools wheel
 python3 -m pip install -r "${REPO_ROOT}/requirements.txt"
+
+if ! python3 -c "import freenect" >/dev/null 2>&1; then
+  echo "==> freenect Python module not available; applying Pi fallback (build deps + pip freenect)..."
+  if [[ "${SKIP_APT}" -eq 0 ]]; then
+    sudo apt install -y python3-dev build-essential cython3 libfreenect-dev
+  else
+    echo "==> --skip-apt set; assuming build deps already installed."
+  fi
+  python3 -m pip install -r "${REPO_ROOT}/requirements-pi-freenect-pip.txt"
+  python3 -c "import freenect; print('freenect OK (pip fallback)')"
+else
+  echo "==> freenect import OK."
+fi
 
 PRESET_FLAG="--brown-sword-preset"
 if [[ "${PRESET}" == "white" ]]; then

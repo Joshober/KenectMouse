@@ -102,6 +102,12 @@ Useful options:
 - `--skip-apt` for faster reruns after first setup
 - `--no-rgb-windows` to hide RGB/mask windows
 
+If your Pi image cannot find `python3-freenect`, the launcher now auto-falls back to the same mouse setup flow:
+
+- installs build deps (`python3-dev`, `build-essential`, `cython3`, `libfreenect-dev`)
+- installs `requirements-pi-freenect-pip.txt`
+- verifies `import freenect` before launching
+
 ---
 
 ## WSL2 on Windows (Kinect USB must be forwarded)
