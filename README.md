@@ -60,6 +60,48 @@ Useful flags:
 - `--max-step`: max movement per frame
 - `--deadzone`: ignore tiny jitter
 
+### Fruit Ninja mode (white poster "sword")
+
+You can track a folded white poster/paper prop as a sword and slice via drag gestures:
+
+```bash
+python3 kinect_mouse.py --fruit-ninja-mode --white-sword-preset --show-rgb --flip-y --edge-margin 0.05
+```
+
+How it works:
+
+- `--white-sword-preset` uses HSV thresholds tuned for bright white objects (low saturation, high value)
+- `--fruit-ninja-mode` holds left mouse down while motion is fast, then releases on slow motion
+- `--slash-speed-px` tunes slash sensitivity (lower = easier to trigger)
+- `--slash-release-frames` tunes how quickly slash drag releases
+
+If your prop is brown (cardboard/wood-like), use:
+
+```bash
+python3 kinect_mouse.py --fruit-ninja-mode --brown-sword-preset --show-rgb --flip-y --edge-margin 0.05
+```
+
+Or run everything in one shot on Raspberry Pi (installs deps, creates venv, installs pip packages, then launches):
+
+```bash
+chmod +x scripts/run_fruit_ninja_pi.sh
+./scripts/run_fruit_ninja_pi.sh --preset brown
+```
+
+Linux executable launcher (small RAM-friendly "exe" for Pi):
+
+```bash
+chmod +x fruit_ninja_pi scripts/run_fruit_ninja_pi.sh
+./fruit_ninja_pi --preset brown
+```
+
+Useful options:
+
+- `--preset white` to track a white poster sword
+- `--test-glview` to verify Kinect feed before launch
+- `--skip-apt` for faster reruns after first setup
+- `--no-rgb-windows` to hide RGB/mask windows
+
 ---
 
 ## WSL2 on Windows (Kinect USB must be forwarded)

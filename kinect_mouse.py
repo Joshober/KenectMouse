@@ -240,10 +240,17 @@ def run(
     show_rgb,
     rgb_refine_depth,
     rgb_depth_percentile,
+    fruit_ninja_mode,
+    slash_speed_px,
+    slash_release_frames,
 ):
     screen_w, screen_h = pyautogui.size()
     prev_x, prev_y = 0, 0
     prev_depth = None
+    prev_raw_x = None
+    prev_raw_y = None
+    mouse_down = False
+    below_slash_frames = 0
 
     # Map Kinect 640x480 to a slightly inset rectangle (calibration: avoid screen edges / failsafe corner).
     margin = max(0.0, min(0.45, edge_margin))
@@ -262,6 +269,11 @@ def run(
         print(
             f"RGB mode: hsv_lower={tuple(hsv_lower)}, hsv_upper={tuple(hsv_upper)}, "
             f"rgb_depth_radius={rgb_depth_radius}, show_rgb={show_rgb}"
+        )
+    if fruit_ninja_mode:
+        print(
+            f"Fruit Ninja mode: slash_speed_px={slash_speed_px}, "
+            f"slash_release_frames={slash_release_frames}"
         )
 
     while True:
@@ -324,7 +336,24 @@ def run(
             pyautogui.moveTo(smooth_x, smooth_y)
             prev_x, prev_y = smooth_x, smooth_y
 
-            if enable_click:
+            if fruit_ninja_mode:
+                if prev_raw_x is not None and prev_raw_y is not None:
+                    motion_px = float(
+                        np.hypot(float(mouse_x - prev_raw_x), float(mouse_y - prev_raw_y))
+                    )
+                    if motion_px >= float(slash_speed_px):
+                        below_slash_frames = 0
+                        if not mouse_down:
+                            pyautogui.mouseDown()
+                            mouse_down = True
+                    else:
+                        below_slash_frames += 1
+                        if mouse_down and below_slash_frames >= int(slash_release_frames):
+                            pyautogui.mouseUp()
+                            mouse_down = False
+                prev_raw_x, prev_raw_y = mouse_x, mouse_y
+                prev_depth = None
+            elif enable_click:
                 d = depth_sample(depth, x, y, radius=rgb_depth_radius if use_rgb else 0)
                 current_depth = d if d is not None else int(depth[y, x])
                 if prev_depth is not None and current_depth < (prev_depth - click_threshold):
@@ -332,6 +361,12 @@ def run(
                 prev_depth = current_depth
         else:
             prev_depth = None
+            prev_raw_x = None
+            prev_raw_y = None
+            below_slash_frames = 0
+            if mouse_down:
+                pyautogui.mouseUp()
+                mouse_down = False
 
         depth_display = (np.clip(depth, 0, 2048) / 2048 * 255).astype(np.uint8)
         cv2.imshow("Depth", depth_display)
@@ -343,6 +378,8 @@ def run(
             break
 
     cv2.destroyAllWindows()
+    if mouse_down:
+        pyautogui.mouseUp()
 
 
 def parse_args():
@@ -471,11 +508,54 @@ def parse_args():
         help="Ignore outer fraction of Kinect frame when mapping to screen (0–0.45). "
         "E.g. 0.08 keeps pointer away from screen edges / PyAutoGUI failsafe corner.",
     )
+    parser.add_argument(
+        "--fruit-ninja-mode",
+        action="store_true",
+        help="Enable sword-like slicing: fast motion holds mouse drag, slow/still motion releases.",
+    )
+    parser.add_argument(
+        "--slash-speed-px",
+        type=float,
+        default=42.0,
+        help="Per-frame cursor movement (pixels) needed to start/continue a slash drag (default: 42).",
+    )
+    parser.add_argument(
+        "--slash-release-frames",
+        type=int,
+        default=3,
+        help="How many consecutive slow frames before releasing slash drag (default: 3).",
+    )
+    parser.add_argument(
+        "--white-sword-preset",
+        action="store_true",
+        help="Convenience preset for tracking a white paper/poster sword in RGB mode.",
+    )
+    parser.add_argument(
+        "--brown-sword-preset",
+        action="store_true",
+        help="Convenience preset for tracking a brown cardboard/wood-like sword prop in RGB mode.",
+    )
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
+    use_rgb = bool(
+        args.use_rgb
+        or args.white_sword_preset
+        or args.brown_sword_preset
+        or args.fruit_ninja_mode
+    )
+    hsv_lower = [max(0, min(179, int(v))) for v in args.hsv_lower]
+    hsv_upper = [max(0, min(255, int(v))) for v in args.hsv_upper]
+    if args.white_sword_preset:
+        # White paper/poster: low saturation + high value.
+        hsv_lower = [0, 0, 185]
+        hsv_upper = [179, 70, 255]
+    elif args.brown_sword_preset:
+        # Brown cardboard/wood-like tones in typical indoor lighting.
+        hsv_lower = [8, 70, 45]
+        hsv_upper = [30, 255, 210]
     run(
         alpha=max(0.0, min(1.0, args.alpha)),
         click_threshold=max(1, args.click_threshold),
@@ -490,11 +570,14 @@ if __name__ == "__main__":
         morph_kernel=max(1, args.morph_kernel),
         morph_open_iters=max(0, args.morph_open_iters),
         morph_close_iters=max(0, args.morph_close_iters),
-        use_rgb=bool(args.use_rgb),
-        hsv_lower=[max(0, min(179, int(v))) for v in args.hsv_lower],
-        hsv_upper=[max(0, min(255, int(v))) for v in args.hsv_upper],
+        use_rgb=use_rgb,
+        hsv_lower=hsv_lower,
+        hsv_upper=hsv_upper,
         rgb_depth_radius=max(0, int(args.rgb_depth_radius)),
         show_rgb=bool(args.show_rgb),
         rgb_refine_depth=str(args.rgb_refine_depth),
         rgb_depth_percentile=max(0.0, min(100.0, float(args.rgb_depth_percentile))),
+        fruit_ninja_mode=bool(args.fruit_ninja_mode),
+        slash_speed_px=max(1.0, float(args.slash_speed_px)),
+        slash_release_frames=max(1, int(args.slash_release_frames)),
     )

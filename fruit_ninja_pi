@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Lightweight Linux executable entrypoint for Raspberry Pi.
+# Delegates to the full bootstrap/run script.
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TARGET="${SCRIPT_DIR}/scripts/run_fruit_ninja_pi.sh"
+
+if [[ ! -x "${TARGET}" ]]; then
+  chmod +x "${TARGET}"
+fi
+
+exec "${TARGET}" "$@"
