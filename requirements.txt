@@ -5,3 +5,4 @@ opencv-python; platform_machine != "aarch64" and platform_machine != "armv7l"
 freenect; platform_machine != "aarch64" and platform_machine != "armv7l"
 pyautogui
 matplotlib
+httpx
