@@ -19,3 +19,6 @@ Thumbs.db
 # Local logs / misc
 *.log
 
+# Secrets (copy from .env.example)
+.env
+

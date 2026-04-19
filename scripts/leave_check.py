@@ -29,6 +29,16 @@ Optional auth environment variables:
 Optional audio environment variables:
 - ALERT_SOUND_PATH                 (path to wav/mp3 file)
 - ALERT_PLAYER_COMMAND             (format command; use {path} placeholder)
+
+Configuration file:
+- Copy `.env.example` to `.env` at the repository root (next to `README.md`).
+  Variables are loaded automatically when you run this script; existing
+  process environment values are not overwritten.
+
+Test mode:
+- `python scripts/leave_check.py --test-example` grabs one Kinect depth/RGB frame,
+  uses a hardcoded checklist (no CHECKLIST_URL), calls OpenRouter, and prints results.
+  Requires OPENROUTER_API_KEY; does not POST the webhook.
 """
 
 import argparse
@@ -48,9 +58,23 @@ import cv2
 import freenect
 import httpx
 import numpy as np
+from dotenv import load_dotenv
 
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+# Hardcoded checklist for `python scripts/leave_check.py --test-example` (Kinect + OpenRouter; no checklist GET).
+EXAMPLE_CHECKLIST_ITEMS = ["laptop bag", "keys", "badge", "water bottle"]
+EXAMPLE_CHECKLIST_SOURCE = "hardcoded_test"
+
+
+def repo_root() -> Path:
+    return Path(__file__).resolve().parent.parent
+
+
+def load_env_file() -> None:
+    dotenv_path = repo_root() / ".env"
+    load_dotenv(dotenv_path=dotenv_path, override=False)
 
 
 def env_header(header_line: str) -> Dict[str, str]:
@@ -173,9 +197,9 @@ def extract_json_blob(raw_text: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def call_openrouter_vision(
+def openrouter_vision_request(
     client: httpx.Client, api_key: str, model: str, checklist_items: List[str], image_data_url: str
-) -> Dict[str, Any]:
+) -> Tuple[str, Dict[str, Any]]:
     checklist_text = "\n".join(f"- {item}" for item in checklist_items)
     prompt_text = (
         "Check this photo and determine if the person appears to have the required items.\n"
@@ -216,7 +240,15 @@ def call_openrouter_vision(
         )
     if not isinstance(message, str):
         raise ValueError("Unexpected model response type")
+    return message, data
 
+
+def call_openrouter_vision(
+    client: httpx.Client, api_key: str, model: str, checklist_items: List[str], image_data_url: str
+) -> Dict[str, Any]:
+    message, _data = openrouter_vision_request(
+        client, api_key=api_key, model=model, checklist_items=checklist_items, image_data_url=image_data_url
+    )
     parsed = extract_json_blob(message)
     if not parsed:
         raise ValueError("Model response did not contain valid JSON object")
@@ -317,11 +349,115 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--jpeg-quality", type=int, default=88, help="RGB JPEG quality (1-100)")
     parser.add_argument(
         "--save-debug-dir",
-        default="",
-        help="If provided, save each trigger image as JPEG in this directory",
+        default="/tmp/leave_debug",
+        help="Directory for trigger JPEGs (default: /tmp/leave_debug)",
+    )
+    parser.add_argument(
+        "--no-save-debug",
+        action="store_true",
+        help="Do not write debug JPEGs (overrides --save-debug-dir)",
     )
     parser.add_argument("--debug-depth", action="store_true", help="Print depth stats during loop")
+    parser.add_argument(
+        "--test-example",
+        action="store_true",
+        help=(
+            "One-shot Kinect depth/RGB capture; hardcoded checklist (no GET); OpenRouter vision; "
+            "print raw model text, parsed JSON, and sample webhook (webhook not sent)"
+        ),
+    )
     return parser.parse_args()
+
+
+def run_test_example(args: argparse.Namespace) -> int:
+    """Grab one Kinect frame, use hardcoded checklist, call OpenRouter, print results (no checklist GET, no webhook POST)."""
+    if not 0.1 <= args.roi_frac <= 1.0:
+        raise RuntimeError("--roi-frac must be between 0.1 and 1.0")
+    if not 1 <= args.jpeg_quality <= 100:
+        raise RuntimeError("--jpeg-quality must be between 1 and 100")
+
+    api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+    if not api_key:
+        print("Fatal: OPENROUTER_API_KEY is required for --test-example (set in .env or environment).")
+        return 1
+
+    model = os.getenv("OPENROUTER_MODEL", "openai/gpt-4.1-mini").strip()
+    timeout = httpx.Timeout(args.http_timeout_seconds)
+
+    print("=== leave_check.py --test-example (Kinect + hardcoded checklist + OpenRouter) ===")
+    print("Checklist (hardcoded, no CHECKLIST_URL fetch):")
+    print(json.dumps({"items": EXAMPLE_CHECKLIST_ITEMS}, indent=2))
+    print()
+
+    depth = get_depth_frame()
+    if depth is None:
+        print("error: no depth frame from Kinect")
+        return 1
+    close_now, p10 = is_close(
+        depth=depth, roi_frac=args.roi_frac, close_threshold_mm=args.close_threshold_mm
+    )
+    print("Kinect depth (center ROI):")
+    print(f"  p10_mm={p10}  close_now={close_now}  roi_frac={args.roi_frac}  threshold_mm={args.close_threshold_mm}")
+    print()
+
+    image_data_url = capture_rgb_data_url(args.jpeg_quality)
+    if not image_data_url:
+        print("error: failed to capture RGB frame from Kinect")
+        return 1
+    print(f"Kinect RGB: JPEG data URL length={len(image_data_url)} chars")
+    if args.save_debug_dir:
+        debug_path = save_debug_frame(image_data_url, args.save_debug_dir)
+        if debug_path:
+            print(f"  saved: {debug_path}")
+    print()
+
+    with httpx.Client(timeout=timeout) as client:
+        try:
+            raw_message, http_payload = openrouter_vision_request(
+                client=client,
+                api_key=api_key,
+                model=model,
+                checklist_items=EXAMPLE_CHECKLIST_ITEMS,
+                image_data_url=image_data_url,
+            )
+        except Exception as exc:
+            print(f"error: OpenRouter request failed: {exc}")
+            return 1
+
+    print("OpenRouter assistant content (raw):")
+    print(raw_message)
+    print()
+
+    choice0 = (http_payload.get("choices") or [{}])[0]
+    finish = choice0.get("finish_reason")
+    print("OpenRouter response meta:")
+    print(f"  finish_reason={finish!r}  model_requested={model!r}")
+    print()
+
+    parsed = extract_json_blob(raw_message)
+    if not parsed:
+        print("parse error: extract_json_blob returned None")
+        return 1
+    print("Parsed JSON object:")
+    print(json.dumps(parsed, indent=2))
+    print()
+
+    all_good, missing = parse_missing_items(parsed)
+    print("parse_missing_items:")
+    print(f"  all_good={all_good!r}")
+    print(f"  missing={missing!r}")
+    print()
+
+    webhook_payload = {
+        "event": "leave_check_forgot_items",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "missing": missing,
+        "checklist_source": EXAMPLE_CHECKLIST_SOURCE,
+        "model": model,
+    }
+    print("Sample webhook JSON (not POSTed in --test-example):")
+    print(json.dumps(webhook_payload, indent=2))
+    return 0
 
 
 def required_env(name: str) -> str:
@@ -445,7 +581,16 @@ def run_loop(args: argparse.Namespace) -> None:
 
 
 def main() -> int:
+    load_env_file()
     args = parse_args()
+    if args.no_save_debug:
+        args.save_debug_dir = ""
+    if args.test_example:
+        try:
+            return run_test_example(args)
+        except Exception as exc:
+            print(f"Fatal: {exc}")
+            return 1
     try:
         run_loop(args)
     except KeyboardInterrupt:
